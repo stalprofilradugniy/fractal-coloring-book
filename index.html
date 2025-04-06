@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Фрактальная Разукрашка</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        #fractalCanvas {
+            border: 1px solid #ccc;
+            cursor: crosshair;
+            touch-action: none; /* Предотвращает стандартное поведение браузера при касании */
+        }
+
+        #controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            align-items: center;
+            justify-content: center; /* Центрирование кнопок */
+            flex-wrap: wrap; /* Перенос кнопок на новую строку при необходимости */
+        }
+
+        #colorPalette {
+            display: flex;
+            gap: 5px;
+        }
+
+        .color-swatch {
+            width: 25px;
+            height: 25px;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+
+        .color-swatch.selected {
+            border: 2px solid black;
+        }
+
+        button {
+            padding: 8px 15px;
+            cursor: pointer;
+            background-color: #eee;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background-color: #ddd;
+        }
+
+        #fractalType {
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+
+        #juliaCValue {
+            display: none; /* Скрываем по умолчанию */
+            margin-left: 10px;
+        }
+
+        #juliaCValue label, #juliaCValue input {
+            margin-right: 5px;
+        }
+
+        #saveLoad {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        #saveLoad button {
+            padding: 8px 15px;
+            cursor: pointer;
+            background-color: #eee;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        #saveLoad button:hover {
+            background-color: #ddd;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>Фрактальная Разукрашка</h1>
+
+    <canvas id="fractalCanvas" width="500" height="500"></canvas>
+
+    <div id="controls">
+        <select id="fractalType">
+            <option value="random">Случайный Фрактал</option>
+            <option value="mandelbrot">Множество Мандельброта</option>
+            <option value="julia">Множество Жюлиа</option>
+        </select>
+
+        <div id="juliaCValue" style="display: none;">
+            <label for="juliaReal">Re(c):</label><input type="number" id="juliaReal" value="-0.4">
+            <label for="juliaImag">Im(c):</label><input type="number" id="juliaImag" value="0.6">
+        </div>
+
+        <div id="colorPalette">
+            <div class="color-swatch" style="background-color: black;" data-color="black"></div>
+            <div class="color-swatch" style="background-color: red;" data-color="red"></div>
+            <div class="color-swatch" style="background-color: blue;" data-color="blue"></div>
+            <div class="color-swatch" style="background-color: green;" data-color="green"></div>
+            <div class="color-swatch" style="background-color: yellow;" data-color="yellow"></div>
+            <div class="color-swatch" style="background-color: orange;" data-color="orange"></div>
+            <div class="color-swatch" style="background-color: purple;" data-color="purple"></div>
+            <div class="color-swatch" style="background-color: white;" data-color="white"></div> <!-- Добавляем белый цвет -->
+            <div class="color-swatch" style="background-color: #808080;" data-color="#808080"></div> <!-- Серый -->
+            <div class="color-swatch" style="background-color: #a52a2a;" data-color="#a52a2a"></div> <!-- Коричневый -->
+        </div>
+    </div>
+
+    <div id="saveLoad">
+        <button id="saveButton">Сохранить</button>
+        <button id="loadButton">Загрузить</button>
+    </div>
+
+
+    <script>
+        const canvas = document.getElementById('fractalCanvas');
+        const ctx = canvas.getContext('2d');
+        const colorPalette = document.getElementById('colorPalette');
+        const fractalTypeSelect = document.getElementById('fractalType');
+        const juliaCValueDiv = document.getElementById('juliaCValue');
+        const juliaRealInput = document.getElementById('juliaReal');
+        const juliaImagInput = document.getElementById('juliaImag');
+        const saveButton = document.getElementById('saveButton');
+        const loadButton = document.getElementById('loadButton');
+
+        let selectedColor = 'black'; // Цвет по умолчанию
+        let fractalData; // Для хранения данных фрактала для раскрашивания
+        let fractalType = 'random'; // Тип фрактала по умолчанию
+        let juliaC = { real: -0.4, imag: 0.6 }; // Значение c для множества Жюлиа по умолчанию
+
+        // Параметры масштабирования и панорамирования
+        let zoomLevel = 1;
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let dragStartX, dragStartY;
+
+        // Цвета палитры
+        colorPalette.addEventListener('click', (event) => {
+            if (event.target.classList.contains('color-swatch')) {
+                document.querySelectorAll('.color-swatch').forEach(swatch => swatch.classList.remove('selected')); // Убираем выделение со всех
+                event.target.classList.add('selected'); // Выделяем выбранный
+                selectedColor = event.target.dataset.color;
+            }
+        });
+
+        // Выбор типа фрактала
+        fractalTypeSelect.addEventListener('change', () => {
+            fractalType = fractalTypeSelect.value;
+            if (fractalType === 'julia') {
+                juliaCValueDiv.style.display = 'flex'; // Показываем поля ввода для c
+            } else {
+                juliaCValueDiv.style.display = 'none'; // Скрываем поля ввода для c
+            }
+            generateFractal();
+        });
+
+        // Обновление значения c для множества Жюлиа при изменении полей ввода
+        juliaRealInput.addEventListener('change', () => {
+            juliaC.real = parseFloat(juliaRealInput.value);
+            generateFractal();
+        });
+
+        juliaImagInput.addEventListener('change', () => {
+            juliaC.imag = parseFloat(juliaImagInput.value);
+            generateFractal();
+        });
+
+
+        function generateRandomFractal() {
+            // Здесь можно реализовать более сложные алгоритмы случайных фракталов,
+            // например, на основе рекурсивных функций или клеточных автоматов.
+            // Для простоты примера, пока просто заполним канву случайными точками.
+
+            const imageData = ctx.createImageData(canvas.width, canvas.height);
+            fractalData = imageData; // Сохраняем данные для раскрашивания
+
+            for (let x = 0; x < canvas.width; x++) {
+                for (let y = 0; y < canvas.height; y++) {
+                    const index = (y * canvas.width + x) * 4;
+                    // Случайный цвет для примера
+                    const colorValue = Math.floor(Math.random() * 255);
+                    imageData.data[index + 0] = colorValue; // R
+                    imageData.data[index + 1] = colorValue; // G
+                    imageData.data[index + 2] = colorValue; // B
+                    imageData.data[index + 3] = 255;       // A
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+
+        function generateMandelbrot() {
+            const imageData = ctx.createImageData(canvas.width, canvas.height);
+            fractalData = imageData;
+
+            const iterations = 100; // Максимальное количество итераций
+            const zoom = 2 / zoomLevel; // Увеличиваем zoom для масштабирования
+            const xOffset = panX; // Панорамирование по X
+            const yOffset = panY; // Панорамирование по Y
+
+            for (let x = 0; x < canvas.width; x++) {
+                for (let y = 0; y < canvas.height; y++) {
+                    let zx = (x - canvas.width / 2) * zoom / canvas.width + xOffset;
+                    let zy = (y - canvas.height / 2) * zoom / canvas.height + yOffset;
+                    let cX = zx;
+                    let cY = zy;
+                    let i = iterations;
+
+                    while (zx * zx + zy * zy < 4 && i > 0) {
+                        let temp = zx * zx - zy * zy + cX;
+                        zy = 2.0 * zx * zy + cY;
+                        zx = temp;
+                        i--;
+                    }
+
+                    const index = (y * canvas.width + x) * 4;
+                    let color = 0;
+                    if (i === 0) {
+                        color = 0; // Внутри множества - черный
+                    } else {
+                        color = i * 5; // Цвет в зависимости от количества итераций
+                    }
+                    imageData.data[index + 0] = color; // R
+                    imageData.data[index + 1] = color; // G
+                    imageData.data[index + 2] = color; // B
+                    imageData.data[index + 3] = 255;   // A
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        function generateJulia() {
+            const imageData = ctx.createImageData(canvas.width, canvas.height);
+            fractalData = imageData;
+
+            const iterations = 100; // Максимальное количество итераций
+            const zoom = 2 / zoomLevel;
+            const xOffset = panX;
+            const yOffset = panY;
+            const cReal = juliaC.real; // Используем значение c из полей ввода
+            const cImag = juliaC.imag;
+
+            for (let x = 0; x < canvas.width; x++) {
+                for (let y = 0; y < canvas.height; y++) {
+                    let zx = (x - canvas.width / 2) * zoom / canvas.width + xOffset;
+                    let zy = (y - canvas.height / 2) * zoom / canvas.height + yOffset;
+                    let i = iterations;
+
+                    while (zx * zx + zy * zy < 4 && i > 0) {
+                        let temp = zx * zx - zy * zy + cReal;
+                        zy = 2.0 * zx * zy + cImag;
+                        zx = temp;
+                        i--;
+                    }
+
+                    const index = (y * canvas.width + x) * 4;
+                    let color = 0;
+                    if (i === 0) {
+                        color = 0; // Внутри множества - черный
+                    } else {
+                        color = i * 5; // Цвет в зависимости от количества итераций
+                    }
+                    imageData.data[index + 0] = color; // R
+                    imageData.data[index + 1] = color; // G
+                    imageData.data[index + 2] = color; // B
+                    imageData.data[index + 3] = 255;   // A
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+
+        function generateFractal() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Очищаем канву перед генерацией нового фрактала
+            zoomLevel = 1; // Сброс масштаба при генерации нового фрактала
+            panX = 0; // Сброс панорамирования
+            panY = 0;
+            if (fractalType === 'random') {
+                generateRandomFractal();
+            } else if (fractalType === 'mandelbrot') {
+                generateMandelbrot();
+            } else if (fractalType === 'julia') {
+                generateJulia();
+            }
+        }
+
+
+        generateFractal(); // Генерация фрактала при загрузке страницы
+
+        // Раскрашивание
+        canvas.addEventListener('mousedown', startPaint);
+        canvas.addEventListener('mouseup', endPaint);
+        canvas.addEventListener('mouseout', endPaint);
+        canvas.addEventListener('mousemove', paint);
+
+        canvas.addEventListener('touchstart', startPaint); // Для касания
+        canvas.addEventListener('touchend', endPaint);
+        canvas.addEventListener('touchcancel', endPaint);
+        canvas.addEventListener('touchmove', paint);
+
+
+        let painting = false;
+
+        function getMousePos(canvas, evt) {
+            let rect = canvas.getBoundingClientRect();
+            let scaleX = canvas.width / rect.width;    // relationship bitmap vs. element for X
+            let scaleY = canvas.height / rect.height;  // relationship bitmap vs. element for Y
+            return {
+              x: (evt.clientX - rect.left) * scaleX,   // scale mouse coordinates after they have been adjusted relative to element
+              y: (evt.clientY - rect.top) * scaleY
+            }
+          }
+
+        function getTouchPos(canvas, touchEvent) {
+            let rect = canvas.getBoundingClientRect();
+            let scaleX = canvas.width / rect.width;    // relationship bitmap vs. element for X
+            let scaleY = canvas.height / rect.height;  // relationship bitmap vs. element for Y
+            return {
+              x: (touchEvent.touches[0].clientX - rect.left) * scaleX,   // scale mouse coordinates after they have been adjusted relative to element
+              y: (touchEvent.touches[0].clientY - rect.top) * scaleY
+            }
+          }
+
+
+        function startPaint(event) {
+            painting = true;
+            paint(event); // Чтобы сразу закрашивать при нажатии
+        }
+
+        function endPaint() {
+            painting = false;
+        }
+
+        function paint(event) {
+            if (!painting) return;
+
+            let pos;
+            if (event.type.startsWith('touch')) {
+                pos = getTouchPos(canvas, event);
+                event.preventDefault(); // Предотвращаем прокрутку страницы при касании
+            } else {
+                pos = getMousePos(canvas, event);
+            }
+
+
+            const x = Math.floor(pos.x);
+            const y = Math.floor(pos.y);
+
+            if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
+                const index = (y * canvas.width + x) * 4;
+                fractalData.data[index + 0] = hexToRgb(selectedColor).r;
+                fractalData.data[index + 1] = hexToRgb(selectedColor).g;
+                fractalData.data[index + 2] = hexToRgb(selectedColor).b;
+                fractalData.data[index + 3] = 255; // Альфа-канал
+                ctx.putImageData(fractalData, 0, 0);
+            }
+        }
+
+        // Функция для преобразования hex-цвета в RGB
+        function hexToRgb(hex) {
+            if (hex.startsWith('#')) {
+                hex = hex.substring(1);
+            }
+            let bigint = parseInt(hex, 16);
+            let r = (bigint >> 16) & 255;
+            let g = (bigint >> 8) & 255;
+            let b = bigint & 255;
+            return { r: r, g: g, b: b };
+        }
+
+
+        // Масштабирование и панорамирование
+
+        // Масштабирование колесом мыши
+        canvas.addEventListener('wheel', (event) => {
+            event.preventDefault(); // Предотвратить прокрутку страницы
+            const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1; // Уменьшение или увеличение масштаба
+            zoomLevel *= zoomFactor;
+            generateFractal();
+        });
+
+        // Панорамирование мышью
+        canvas.addEventListener('mousedown', (event) => {
+            isDragging = true;
+            dragStartX = event.clientX;
+            dragStartY = event.clientY;
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mouseout', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mousemove', (event) => {
+            if (!isDragging) return;
+            const dragDeltaX = event.clientX - dragStartX;
+            const dragDeltaY = event.clientY - dragStartY;
+
+            panX += dragDeltaX / (canvas.width * zoomLevel); // Корректировка панорамирования в зависимости от масштаба
+            panY += dragDeltaY / (canvas.height * zoomLevel);
+
+            dragStartX = event.clientX;
+            dragStartY = event.clientY;
+
+            generateFractal();
+        });
+
+        // Панорамирование касанием (для мобильных устройств)
+        canvas.addEventListener('touchstart', (event) => {
+            if (event.touches.length === 1) { // Панорамирование одним пальцем
+                isDragging = true;
+                dragStartX = event.touches[0].clientX;
+                dragStartY = event.touches[0].clientY;
+            }
+        });
+
+        canvas.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('touchcancel', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('touchmove', (event) => {
+            if (!isDragging || event.touches.length > 1) return; // Отключаем панорамирование при мультитач
+
+            const dragDeltaX = event.touches[0].clientX - dragStartX;
+            const dragDeltaY = event.touches[0].clientY - dragStartY;
+
+            panX += dragDeltaX / (canvas.width * zoomLevel);
+            panY += dragDeltaY / (canvas.height * zoomLevel);
+
+            dragStartX = event.touches[0].clientX;
+            dragStartY = event.touches[0].clientY;
+
+            generateFractal();
+            event.preventDefault(); // Предотвращаем прокрутку страницы при панорамировании
+        }, { passive: false }); // passive: false необходимо для preventDefault внутри touchmove
+
+
+        // Сохранение и загрузка
+
+        saveButton.addEventListener('click', () => {
+            const dataURL = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = dataURL;
+            link.download = 'fractal_coloring.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        loadButton.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            // После загрузки изображения, нужно обновить fractalData,
+                            // чтобы раскрашивание работало на загруженном изображении.
+                            fractalData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            input.click();
+        });
+
+
+    </script>
+</body>
+</html>
