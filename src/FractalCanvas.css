@@ -1,5 +1,0 @@
-.fractal-canvas {
-  border: 1px solid #ddd;
-  cursor: crosshair; /* Изменение курсора для указания на интерактивность */
-  margin-right: 20px; /* Отступ справа от канваса, чтобы отделить от палитры */
-}
